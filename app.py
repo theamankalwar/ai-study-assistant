@@ -40,6 +40,79 @@ st.set_page_config(
 )
 
 
+st.markdown(
+    """
+    <style>
+    /* Main application background and spacing */
+    [data-testid="stAppViewContainer"] {
+        background: #0B1020;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(11, 16, 32, 0.85);
+    }
+
+    .block-container {
+        max-width: 1100px;
+        padding-top: 2.5rem;
+        padding-bottom: 3rem;
+    }
+
+    /* Typography */
+    h1, h2, h3 {
+        color: #F1F5FF !important;
+        letter-spacing: -0.035em;
+    }
+
+    p, label, [data-testid="stCaptionContainer"] {
+        color: #A6B3CC;
+    }
+
+    /* PDF uploader */
+    [data-testid="stFileUploaderDropzone"] {
+        background: #141D32;
+        border: 1px dashed #536DE8;
+        border-radius: 16px;
+        padding: 1.5rem;
+    }
+
+    [data-testid="stFileUploaderDropzone"]:hover {
+        border-color: #91AFFF;
+        background: #18243B;
+    }
+
+    /* Chat message panels */
+    [data-testid="stChatMessage"] {
+        border: 1px solid #29344D;
+        border-radius: 16px;
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+        background: #11192B;
+    }
+
+    /* Chat input */
+    [data-testid="stChatInput"] {
+        border: 1px solid #344463;
+        border-radius: 14px;
+    }
+
+    /* Expandable source panels */
+    [data-testid="stExpander"] {
+        border: 1px solid #29344D;
+        border-radius: 12px;
+        background: #11192B;
+    }
+
+    /* Subtle dividers */
+    hr {
+        border-color: #29344D;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 # ============================================================
 # 2. LOAD CONFIGURATION SECURELY
 # ============================================================
