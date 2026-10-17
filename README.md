@@ -4,7 +4,7 @@ An AI-powered study assistant that answers questions from uploaded PDF documents
 
 ## 🚀 Live Demo
 
-**Try the application:** [Add your deployed Streamlit URL here]
+**Try the application:** (https://ai-study-assistant-ak.streamlit.app/)
 
 ## ✨ Features
 
