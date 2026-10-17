@@ -318,6 +318,17 @@ if "question_count" not in st.session_state:
 if "document_signature" not in st.session_state:
     st.session_state.document_signature = None
 
+# PDFs are held in this session-level library so users can add or remove
+# individual documents without having to upload the whole collection again.
+if "library_docs" not in st.session_state:
+    st.session_state.library_docs = {}
+
+if "upload_widget_version" not in st.session_state:
+    st.session_state.upload_widget_version = 0
+
+if "upload_notice" not in st.session_state:
+    st.session_state.upload_notice = None
+
 
 def clear_conversation() -> None:
     """Clear chat history without resetting the session usage limit."""
@@ -433,6 +444,64 @@ def split_into_chunks(
     return chunks
 
 
+def make_document_id(filename: str, pdf_bytes: bytes) -> str:
+    """Build a stable ID from a document's filename and contents."""
+    digest = hashlib.sha256()
+    digest.update(filename.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(pdf_bytes)
+    return digest.hexdigest()
+
+
+def validate_pdf_collection(documents: dict[str, dict[str, Any]]) -> dict[str, int]:
+    """Validate collection count, sizes, PDF validity and page limits."""
+    if len(documents) > MAX_PDFS:
+        raise ValueError(f"You can have at most {MAX_PDFS} PDF files in your study library.")
+
+    total_bytes = sum(len(doc["content"]) for doc in documents.values())
+    max_total_bytes = MAX_TOTAL_UPLOAD_MB * 1024 * 1024
+    if total_bytes > max_total_bytes:
+        raise ValueError(
+            f"The combined PDF size cannot exceed {MAX_TOTAL_UPLOAD_MB} MB."
+        )
+
+    page_counts: dict[str, int] = {}
+    total_pages = 0
+
+    for document_id, document in documents.items():
+        filename = document["name"]
+        pdf_bytes = document["content"]
+
+        if len(pdf_bytes) > MAX_PDF_SIZE_MB * 1024 * 1024:
+            raise ValueError(
+                f"{filename} exceeds the {MAX_PDF_SIZE_MB} MB per-file limit."
+            )
+
+        try:
+            with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
+                page_count = len(pdf)
+        except Exception as error:
+            raise ValueError(
+                f"Could not read '{filename}'. Please upload a valid, unencrypted PDF."
+            ) from error
+
+        if page_count > MAX_PAGES_PER_PDF:
+            raise ValueError(
+                f"{filename} has {page_count} pages; the per-PDF limit is "
+                f"{MAX_PAGES_PER_PDF}."
+            )
+
+        total_pages += page_count
+        if total_pages > MAX_TOTAL_PAGES:
+            raise ValueError(
+                f"The combined page count exceeds {MAX_TOTAL_PAGES}."
+            )
+
+        page_counts[document_id] = page_count
+
+    return page_counts
+
+
 # ============================================================
 # 7. PROCESS MULTIPLE PDF DOCUMENTS
 # ============================================================
@@ -492,6 +561,7 @@ def build_knowledge_base(
             files_without_text.append(filename)
 
         document_summaries.append({
+            "id": make_document_id(filename, pdf_bytes),
             "name": filename,
             "size_mb": len(pdf_bytes) / (1024 * 1024),
             "pages": page_count,
@@ -703,7 +773,7 @@ def build_chat_export(
 
 
 # ============================================================
-# 12. MAIN EXPERIENCE: HERO AND UPLOAD
+# 12. MAIN EXPERIENCE: HERO AND DOCUMENT UPLOAD
 # ============================================================
 
 st.markdown(
@@ -735,23 +805,58 @@ if not GROQ_API_KEY:
 st.markdown("### Your study library")
 st.caption(
     f"Upload up to {MAX_PDFS} PDFs · {MAX_PDF_SIZE_MB} MB per file · "
-    f"{MAX_TOTAL_UPLOAD_MB} MB combined"
+    f"{MAX_TOTAL_UPLOAD_MB} MB combined · {MAX_TOTAL_PAGES} pages total"
 )
 
 uploaded_files = st.file_uploader(
-    "Choose your study documents",
+    "Add study documents",
     type=["pdf"],
     accept_multiple_files=True,
     max_upload_size=MAX_PDF_SIZE_MB,
     help=(
         f"Maximum {MAX_PDFS} PDFs, {MAX_PDF_SIZE_MB} MB per file, "
-        f"and {MAX_TOTAL_UPLOAD_MB} MB combined."
+        f"{MAX_TOTAL_UPLOAD_MB} MB combined, and {MAX_TOTAL_PAGES} total pages."
     ),
-    key="study_pdf_uploader",
+    key=f"study_pdf_uploader_{st.session_state.upload_widget_version}",
 )
 
-# Friendly empty state while keeping the upload control visible.
-if not uploaded_files:
+# Merge newly selected files into the session library. The uploader key is
+# incremented after a successful merge so users can add files in later rounds.
+if uploaded_files:
+    candidate_library = dict(st.session_state.library_docs)
+    added_names = []
+
+    for uploaded_file in uploaded_files:
+        content = uploaded_file.getvalue()
+        document_id = make_document_id(uploaded_file.name, content)
+        if document_id not in candidate_library:
+            candidate_library[document_id] = {
+                "id": document_id,
+                "name": uploaded_file.name,
+                "content": content,
+            }
+            added_names.append(uploaded_file.name)
+
+    try:
+        validate_pdf_collection(candidate_library)
+        st.session_state.library_docs = candidate_library
+        if added_names:
+            st.session_state.upload_notice = (
+                f"Added {len(added_names)} document(s) to your study library."
+            )
+        else:
+            st.session_state.upload_notice = "Those documents are already in your study library."
+        st.session_state.upload_widget_version += 1
+        st.rerun()
+    except ValueError as error:
+        st.error(str(error))
+
+if st.session_state.upload_notice:
+    st.success(st.session_state.upload_notice)
+    st.session_state.upload_notice = None
+
+# Empty state: leave the uploader visible, but don't build an empty index.
+if not st.session_state.library_docs:
     st.markdown("#### Start with your notes")
     feature_columns = st.columns(3)
     feature_cards = [
@@ -767,29 +872,21 @@ if not uploaded_files:
     st.info("Upload your study notes above to start chatting.")
     st.stop()
 
-
-# ============================================================
-# 13. VALIDATE UPLOAD COUNT AND TOTAL SIZE
-# ============================================================
-
-if len(uploaded_files) > MAX_PDFS:
-    st.error(f"You can upload at most {MAX_PDFS} PDF files.")
+# Validate the persisted library on every rerun, including limits for documents
+# that were uploaded in an earlier interaction.
+try:
+    validate_pdf_collection(st.session_state.library_docs)
+except ValueError as error:
+    st.error(str(error))
     st.stop()
 
-total_size_bytes = sum(file.size for file in uploaded_files)
-max_total_bytes = MAX_TOTAL_UPLOAD_MB * 1024 * 1024
-if total_size_bytes > max_total_bytes:
-    st.error(
-        f"The combined PDF size cannot exceed {MAX_TOTAL_UPLOAD_MB} MB. "
-        "Remove one or more files and try again."
-    )
-    st.stop()
-
-pdf_files = tuple((file.name, file.getvalue()) for file in uploaded_files)
-
+pdf_files = tuple(
+    (document["name"], document["content"])
+    for document in st.session_state.library_docs.values()
+)
 
 # ============================================================
-# 14. BUILD THE KNOWLEDGE BASE
+# 13. BUILD THE KNOWLEDGE BASE
 # ============================================================
 
 try:
@@ -810,19 +907,17 @@ if not chunks:
     st.error("No searchable text was found. Please upload PDFs with selectable text.")
     st.stop()
 
-# Reset conversation if the uploaded document collection changes.
+# Reset conversation when the document library changes.
 document_signature = tuple(
-    (filename, hashlib.sha256(contents).hexdigest())
+    make_document_id(filename, contents)
     for filename, contents in pdf_files
 )
-
 if st.session_state.document_signature != document_signature:
     st.session_state.document_signature = document_signature
     st.session_state.messages = [{"role": "assistant", "content": WELCOME_MESSAGE}]
 
-
 # ============================================================
-# 15. KNOWLEDGE-BASE STATUS AND DOCUMENT PRESENTATION
+# 14. KNOWLEDGE-BASE STATUS AND DOCUMENT MANAGEMENT
 # ============================================================
 
 all_pages = sum(item["pages"] for item in document_summaries)
@@ -831,21 +926,40 @@ metric_columns[0].metric("Documents", len(document_summaries))
 metric_columns[1].metric("Pages", all_pages)
 metric_columns[2].metric("Searchable chunks", len(chunks))
 
-with st.expander("🗂️ Uploaded documents", expanded=True):
+with st.expander("🗂️ Manage study documents", expanded=True):
+    st.caption("Remove individual PDFs from this session's searchable library.")
     for document in document_summaries:
-        document_columns = st.columns([5, 1.4, 1.4, 1.4])
+        document_columns = st.columns([4.5, 1, 1, 1.2, 1.2])
         with document_columns[0]:
             st.markdown(f"**📄 {document['name']}**")
             st.caption(f"{document['size_mb']:.2f} MB")
         document_columns[1].metric("Pages", document["pages"])
         document_columns[2].metric("Chunks", document["chunks"])
         document_columns[3].metric("Status", "Ready")
+        if document_columns[4].button(
+            "Remove",
+            key=f"remove_document_{document['id']}",
+            use_container_width=True,
+        ):
+            st.session_state.library_docs.pop(document["id"], None)
+            st.session_state.document_signature = None
+            clear_conversation()
+            st.session_state.upload_notice = f"Removed {document['name']} from your study library."
+            st.session_state.upload_widget_version += 1
+            st.rerun()
+
+    if st.button("Remove all documents", type="secondary", key="remove_all_documents"):
+        st.session_state.library_docs = {}
+        st.session_state.document_signature = None
+        st.session_state.upload_widget_version += 1
+        clear_conversation()
+        st.session_state.upload_notice = "Your study library is now empty."
+        st.rerun()
 
 st.divider()
 
-
 # ============================================================
-# 16. CHAT HISTORY AND QUESTION LIMIT
+# 15. CHAT HISTORY, EXPORT AND QUESTION LIMIT
 # ============================================================
 
 st.markdown("### Ask your notes")
@@ -889,9 +1003,8 @@ else:
         "This basic limit is session-based and can reset when a new session starts."
     )
 
-
 # ============================================================
-# 17. HANDLE QUESTIONS
+# 16. HANDLE QUESTIONS
 # ============================================================
 
 if question:
