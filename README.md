@@ -27,15 +27,54 @@ An AI-powered study assistant that answers questions from uploaded PDF documents
 - **LLM API:** Groq
 - **Version Control:** Git and GitHub
 
-## 🧠 How It Works
 
-1. The user uploads one or more PDF documents.
-2. The application extracts text from each page.
-3. The text is split into overlapping chunks while retaining source metadata.
-4. Sentence Transformers converts the chunks into embeddings.
-5. Semantic search retrieves passages relevant to the user's question.
-6. Groq's language model generates an answer using the retrieved passages and conversation context.
-7. The application displays the answer and the retrieved source passages.
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TD
+    A["User uploads PDF documents"]
+    B["Streamlit Interface"]
+    C["PyMuPDF: Extract text"]
+    D["Split text into chunks"]
+    E["Sentence Transformers"]
+    F["Chunk embeddings + source metadata"]
+
+    G["User asks a question"]
+    H["Groq: Rewrite follow-up query"]
+    I["Embed search query"]
+    J["NumPy cosine similarity"]
+    K["Retrieve top 3 chunks"]
+    L["Groq LLM generates answer"]
+    M["Answer + source references"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+
+    G --> B
+    B --> H
+    F --> J
+    H --> I
+    I --> J
+    J --> K
+    K --> L
+    G --> L
+    L --> M
+    M --> B
+```
+
+### How It Works
+
+1. **Document ingestion:** Users upload multiple PDFs through the Streamlit interface.
+2. **Text extraction:** PyMuPDF extracts text from each page.
+3. **Chunking:** The extracted text is divided into overlapping chunks while preserving the source filename and page number.
+4. **Embedding generation:** Sentence Transformers converts chunks into numerical vectors.
+5. **Semantic retrieval:** The user's question is embedded and compared with document embeddings using cosine similarity. The most relevant chunks are selected.
+6. **Answer generation:** Groq receives the question, conversation context, and retrieved passages to generate an answer.
+7. **Source display:** The application displays the answer alongside the retrieved document passages and their source metadata.
+
 
 ## 💻 Run Locally
 
