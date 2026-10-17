@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime
 import os
 import re
 from typing import Any
@@ -654,6 +655,53 @@ def display_sources(sources: list[dict[str, Any]]) -> None:
             st.divider()
 
 
+def build_chat_export(
+    messages: list[dict[str, Any]],
+    document_summaries: list[dict[str, Any]],
+) -> str:
+    """Format the current conversation as a downloadable Markdown file."""
+    lines = [
+        "# AI Study Assistant — Conversation Export",
+        "",
+        f"Exported: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')}",
+        "",
+        "## Documents in this session",
+        "",
+    ]
+
+    for document in document_summaries:
+        lines.append(
+            f"- **{document['name']}** — {document['pages']} pages, "
+            f"{document['chunks']} searchable chunks"
+        )
+
+    lines.extend(["", "---", "", "## Conversation", ""])
+
+    for message in messages:
+        role = message.get("role", "assistant")
+        title = "You" if role == "user" else "AI Study Assistant"
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+
+        lines.extend([f"### {title}", "", content, ""])
+
+        sources = message.get("sources", [])
+        if sources:
+            lines.extend(["**Retrieved sources**", ""])
+            for source in sources:
+                lines.append(
+                    f"- **{source['source']}**, page {source['page']} "
+                    f"(similarity: {source['score']:.3f})"
+                )
+                source_text = str(source.get("text", "")).strip()
+                if source_text:
+                    lines.extend(["", f"> {source_text}"])
+                lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 # ============================================================
 # 12. MAIN EXPERIENCE: HERO AND UPLOAD
 # ============================================================
@@ -803,7 +851,7 @@ st.divider()
 st.markdown("### Ask your notes")
 st.caption("Answers are generated from retrieved passages. Check the source panel when accuracy matters.")
 
-chat_header_columns = st.columns([4, 1.3])
+chat_header_columns = st.columns([3.4, 1.2, 1.5])
 with chat_header_columns[0]:
     st.caption(
         f"Questions used this session: {st.session_state.question_count}/"
@@ -813,6 +861,15 @@ with chat_header_columns[1]:
     if st.button("Clear chat", use_container_width=True):
         clear_conversation()
         st.rerun()
+with chat_header_columns[2]:
+    st.download_button(
+        label="Download chat",
+        data=build_chat_export(st.session_state.messages, document_summaries),
+        file_name="ai-study-assistant-chat.md",
+        mime="text/markdown",
+        use_container_width=True,
+        help="Download this conversation and its retrieved source references.",
+    )
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
