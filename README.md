@@ -6,6 +6,19 @@ An AI-powered study assistant that answers questions from uploaded PDF documents
 
 **Try the application:** (https://ai-study-assistant-ak.streamlit.app/)
 
+
+## 🖥️ Application Screenshots
+
+### Home Screen
+![AI Study Assistant home screen](screenshots/home.png)
+
+### Chatting with Study Notes
+![AI-generated answer from study notes](screenshots/chat-answer.png)
+
+### Retrieved Sources
+![Source filenames and page references](screenshots/source-references.png)
+
+
 ## ✨ Features
 
 - Upload multiple PDF documents.
